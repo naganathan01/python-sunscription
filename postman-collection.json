@@ -1,0 +1,499 @@
+{
+  "info": {
+    "name": "Subscription Management API",
+    "description": "Complete API collection for testing subscription management system with Stripe integration",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000",
+      "type": "string"
+    },
+    {
+      "key": "user_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "plan_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "subscription_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": ["{{baseUrl}}"],
+          "path": ["health"]
+        }
+      }
+    },
+    {
+      "name": "User Management",
+      "item": [
+        {
+          "name": "Create User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('user_id', response.id);",
+                  "    pm.test('User created successfully', () => {",
+                  "        pm.expect(response.id).to.exist;",
+                  "        pm.expect(response.email).to.exist;",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"John Doe\",\n    \"email\": \"john.doe@example.com\",\n    \"phone\": \"+1234567890\",\n    \"company\": \"Test Company\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/users",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "users"]
+            }
+          }
+        },
+        {
+          "name": "Get User",
+                      "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/plans",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "plans"]
+            }
+          }
+        },
+        {
+          "name": "Get Plan by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/plans/{{plan_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "plans", "{{plan_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Coupon Management",
+      "item": [
+        {
+          "name": "Create Coupon",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"code\": \"SAVE20\",\n    \"discount_type\": \"percentage\",\n    \"discount_value\": 20,\n    \"valid_until\": \"2024-12-31T23:59:59\",\n    \"max_uses\": 100\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/coupons",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "coupons"]
+            }
+          }
+        },
+        {
+          "name": "Validate Coupon",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/coupons/SAVE20/validate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "coupons", "SAVE20", "validate"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Subscription Management",
+      "item": [
+        {
+          "name": "Create Subscription",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('subscription_id', response.subscription_id);",
+                  "    pm.test('Subscription created successfully', () => {",
+                  "        pm.expect(response.subscription_id).to.exist;",
+                  "        pm.expect(response.status).to.equal('active');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"user_id\": {{user_id}},\n    \"plan_id\": {{plan_id}},\n    \"quantity\": 1\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/subscriptions",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "subscriptions"]
+            }
+          }
+        },
+        {
+          "name": "Create Subscription with Coupon",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"user_id\": {{user_id}},\n    \"plan_id\": {{plan_id}},\n    \"quantity\": 1,\n    \"coupon_code\": \"SAVE20\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/subscriptions",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "subscriptions"]
+            }
+          }
+        },
+        {
+          "name": "Update Subscription Quantity",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"quantity\": 3\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/subscriptions/{{subscription_id}}/quantity",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "subscriptions", "{{subscription_id}}", "quantity"]
+            }
+          }
+        },
+        {
+          "name": "Cancel Subscription (At Period End)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"immediate\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/subscriptions/{{subscription_id}}/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "subscriptions", "{{subscription_id}}", "cancel"]
+            }
+          }
+        },
+        {
+          "name": "Cancel Subscription (Immediate)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"immediate\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/subscriptions/{{subscription_id}}/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "subscriptions", "{{subscription_id}}", "cancel"]
+            }
+          }
+        },
+        {
+          "name": "Reactivate Subscription",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/subscriptions/{{subscription_id}}/reactivate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "subscriptions", "{{subscription_id}}", "reactivate"]
+            }
+          }
+        },
+        {
+          "name": "Change Subscription Plan",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"plan_id\": 2,\n    \"prorate\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/subscriptions/{{subscription_id}}/change-plan",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "subscriptions", "{{subscription_id}}", "change-plan"]
+            }
+          }
+        },
+        {
+          "name": "Get User Subscriptions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/{{user_id}}/subscriptions",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "users", "{{user_id}}", "subscriptions"]
+            }
+          }
+        },
+        {
+          "name": "Search Subscriptions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/subscriptions/search?status=active&page=1&per_page=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "subscriptions", "search"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "active"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "10"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Usage Tracking",
+      "item": [
+        {
+          "name": "Record Usage",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"metric_name\": \"api_calls\",\n    \"quantity\": 100,\n    \"metadata\": {\n        \"source\": \"mobile_app\",\n        \"endpoint\": \"/api/data\"\n    }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/subscriptions/{{subscription_id}}/usage",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "subscriptions", "{{subscription_id}}", "usage"]
+            }
+          }
+        },
+        {
+          "name": "Get Usage Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/subscriptions/{{subscription_id}}/usage",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "subscriptions", "{{subscription_id}}", "usage"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dashboard & Analytics",
+      "item": [
+        {
+          "name": "Revenue Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/revenue",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "dashboard", "revenue"]
+            }
+          }
+        },
+        {
+          "name": "Subscription Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/subscriptions",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "dashboard", "subscriptions"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Bulk Operations",
+      "item": [
+        {
+          "name": "Bulk Cancel Subscriptions",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"subscription_ids\": [1, 2, 3],\n    \"immediate\": false,\n    \"reason\": \"Promotional period ended\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/subscriptions/bulk-cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "subscriptions", "bulk-cancel"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Export",
+      "item": [
+        {
+          "name": "Export Subscriptions (JSON)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/export/subscriptions?format=json",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "export", "subscriptions"],
+              "query": [
+                {
+                  "key": "format",
+                  "value": "json"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Export Subscriptions (CSV)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/export/subscriptions?format=csv",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "export", "subscriptions"],
+              "query": [
+                {
+                  "key": "format",
+                  "value": "csv"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
+          
