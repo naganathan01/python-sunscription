@@ -38,7 +38,7 @@ class Plan(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text)
-    amount = db.Column(db.Numeric(10, 2), nullable=False)  # Fixed: renamed from price
+    amount = db.Column(db.Numeric(10, 2), nullable=False)
     interval = db.Column(db.String(20), default='monthly')
     stripe_price_id = db.Column(db.String(100), unique=True)
     stripe_product_id = db.Column(db.String(100))
@@ -64,20 +64,10 @@ class Subscription(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-class Revenue(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    subscription_id = db.Column(db.Integer, db.ForeignKey('subscription.id'), nullable=False)
-    amount = db.Column(db.Numeric(10, 2), nullable=False)
-    currency = db.Column(db.String(3), default='usd')
-    stripe_invoice_id = db.Column(db.String(100))
-    payment_date = db.Column(db.DateTime, default=datetime.utcnow)
-    status = db.Column(db.String(20), default='paid')
-    description = db.Column(db.String(255))
-
 class Coupon(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     code = db.Column(db.String(50), unique=True, nullable=False)
-    discount_type = db.Column(db.String(20), nullable=False)  # percentage, fixed_amount
+    discount_type = db.Column(db.String(20), nullable=False)
     discount_value = db.Column(db.Numeric(10, 2), nullable=False)
     stripe_coupon_id = db.Column(db.String(100))
     valid_from = db.Column(db.DateTime, default=datetime.utcnow)
@@ -86,63 +76,36 @@ class Coupon(db.Model):
     current_uses = db.Column(db.Integer, default=0)
     active = db.Column(db.Boolean, default=True)
 
-class Usage(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    subscription_id = db.Column(db.Integer, db.ForeignKey('subscription.id'), nullable=False)
-    metric_name = db.Column(db.String(100), nullable=False)
-    quantity = db.Column(db.Integer, nullable=False)
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
-    usage_data = db.Column(db.String(255))
-
 class AuditLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
     action = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text)
-    metadata = db.Column(db.JSON)  # Fixed: was usage_data
+    extra_data = db.Column(db.JSON)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
     ip_address = db.Column(db.String(45))
 
-# Helper Functions
-def create_stripe_customer(email, name):
-    try:
-        customer = stripe.Customer.create(
-            email=email,
-            name=name
-        )
-        return customer.id
-    except stripe.error.StripeError as e:
-        raise Exception(f"Stripe error: {str(e)}")
 
-def log_audit(user_id, action, description, metadata=None):
-    audit = AuditLog(
-        user_id=user_id,
-        action=action,
-        description=description,
-        metadata=metadata,
-        ip_address=request.remote_addr
-    )
+# ---------------- Helpers ---------------- #
+def create_stripe_customer(email, name):
+    customer = stripe.Customer.create(email=email, name=name)
+    return customer.id
+
+def log_audit(user_id, action, description, extra_data=None):
+    audit = AuditLog(user_id=user_id, action=action, description=description, extra_data=extra_data, ip_address=request.remote_addr)
     db.session.add(audit)
 
-# Health Check
+
+
+# ---------------- Health Check ---------------- #
 @app.route('/health', methods=['GET'])
 def health_check():
     try:
-        # Check database connection
         db.session.execute(db.text('SELECT 1'))
-        
-        return jsonify({
-            'status': 'healthy',
-            'database': 'connected',
-            'timestamp': datetime.utcnow().isoformat()
-        })
-        
+        return jsonify({'status': 'healthy'})
     except Exception as e:
-        return jsonify({
-            'status': 'unhealthy',
-            'error': str(e),
-            'timestamp': datetime.utcnow().isoformat()
-        }), 500
+        return jsonify({'status': 'unhealthy', 'error': str(e)}), 500
+
 
 # User Management Routes
 @app.route('/api/users', methods=['POST'])
@@ -246,44 +209,51 @@ def create_plan():
         data = request.json
         name = data.get('name')
         description = data.get('description', '')
-        amount = Decimal(str(data.get('amount')))  # Fixed: changed from price
+        amount = Decimal(str(data.get('amount')))  # accept "amount" in request JSON
         interval = data.get('interval', 'monthly')
         features = data.get('features', [])
         trial_days = data.get('trial_days', 0)
-        setup_fee = data.get('setup_fee', 0)
+        setup_fee = Decimal(str(data.get('setup_fee', 0)))
 
-        if not name or not amount:
+        if not name or amount is None:
             return jsonify({'error': 'Name and amount are required'}), 400
 
-        # Create Stripe product and price
+        # Create Stripe product and price (best-effort, continue if it fails)
         stripe_product_id = None
         stripe_price_id = None
-        
+
         try:
-            # Create Stripe product
-            product = stripe.Product.create(
-                name=name,
-                description=description
-            )
+            product = stripe.Product.create(name=name, description=description)
             stripe_product_id = product.id
 
-            # Create Stripe price
+            # Stripe recurring interval must be one of 'day','week','month','year'
+            interval_for_stripe = interval
+            if interval in ('monthly', 'month'):
+                interval_for_stripe = 'month'
+            elif interval in ('yearly', 'year'):
+                interval_for_stripe = 'year'
+            elif interval in ('weekly', 'week'):
+                interval_for_stripe = 'week'
+            elif interval in ('daily', 'day'):
+                interval_for_stripe = 'day'
+            else:
+                interval_for_stripe = 'month'
+
             stripe_price = stripe.Price.create(
-                unit_amount=int(amount * 100),  # Convert to cents
+                unit_amount=int(amount * 100),
                 currency='usd',
-                recurring={'interval': interval},
+                recurring={'interval': interval_for_stripe},
                 product=product.id
             )
             stripe_price_id = stripe_price.id
         except Exception as e:
             print(f"Stripe product/price creation failed: {e}")
-            # Continue without Stripe for testing
+            # Continue without Stripe integration
 
-        # Create plan in database
         plan = Plan(
             name=name,
             description=description,
-            amount=amount,  # Fixed: changed from price
+            amount=amount,
             interval=interval,
             stripe_price_id=stripe_price_id,
             stripe_product_id=stripe_product_id,
@@ -314,6 +284,7 @@ def create_plan():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/api/plans', methods=['GET'])
 def get_plans():
     plans = Plan.query.filter_by(active=True).all()
@@ -329,6 +300,7 @@ def get_plans():
         'stripe_price_id': plan.stripe_price_id
     } for plan in plans])
 
+
 @app.route('/api/plans/<int:plan_id>', methods=['GET'])
 def get_plan(plan_id):
     plan = Plan.query.get_or_404(plan_id)
@@ -343,6 +315,32 @@ def get_plan(plan_id):
         'setup_fee': float(plan.setup_fee),
         'stripe_price_id': plan.stripe_price_id
     })
+
+
+@app.route('/api/plans/<int:plan_id>', methods=['PUT'])
+def update_plan(plan_id):
+    plan = Plan.query.get_or_404(plan_id)
+    data = request.json
+
+    if 'name' in data:
+        plan.name = data['name']
+    if 'description' in data:
+        plan.description = data['description']
+    if 'features' in data:
+        plan.features = data['features']
+    if 'trial_days' in data:
+        plan.trial_days = data['trial_days']
+    if 'amount' in data:
+        plan.amount = Decimal(str(data['amount']))
+    if 'setup_fee' in data:
+        plan.setup_fee = Decimal(str(data['setup_fee']))
+
+    db.session.commit()
+    log_audit(None, 'PLAN_UPDATED', f'Plan {plan.name} updated')
+    db.session.commit()
+
+    return jsonify({'message': 'Plan updated successfully'})
+
 
 # Coupon Management Routes
 @app.route('/api/coupons', methods=['POST'])
@@ -431,8 +429,7 @@ def validate_coupon(code):
         'discount_value': float(coupon.discount_value),
         'stripe_coupon_id': coupon.stripe_coupon_id
     })
-
-# Subscription Management Routes
+# ---------------- Subscription Creation ---------------- #
 @app.route('/api/subscriptions', methods=['POST'])
 def create_subscription():
     try:
@@ -445,53 +442,38 @@ def create_subscription():
         if not user_id or not plan_id:
             return jsonify({'error': 'User ID and Plan ID are required'}), 400
 
-        user = User.query.get(user_id)
-        plan = Plan.query.get(plan_id)
-
+        user = db.session.get(User, user_id)
+        plan = db.session.get(Plan, plan_id)
         if not user or not plan:
             return jsonify({'error': 'User or Plan not found'}), 404
 
         # Create Stripe subscription
         stripe_subscription_id = None
+        client_secret = None
         try:
-            if user.stripe_customer_id and plan.stripe_price_id:
-                subscription_data = {
-                    'customer': user.stripe_customer_id,
-                    'items': [{
-                        'price': plan.stripe_price_id,
-                        'quantity': quantity,
-                    }],
-                    'expand': ['latest_invoice.payment_intent'],
-                }
-                
-                # Add trial period if available
-                if plan.trial_days > 0:
-                    subscription_data['trial_period_days'] = plan.trial_days
-                
-                # Add coupon if provided
-                if coupon_code:
-                    coupon = Coupon.query.filter_by(code=coupon_code, active=True).first()
-                    if coupon and coupon.stripe_coupon_id:
-                        subscription_data['coupon'] = coupon.stripe_coupon_id
-                        # Update coupon usage
-                        coupon.current_uses += 1
-                
-                stripe_subscription = stripe.Subscription.create(**subscription_data)
-                stripe_subscription_id = stripe_subscription.id
-                
-                # Get the client secret for frontend payment confirmation
-                client_secret = None
-                if stripe_subscription.latest_invoice.payment_intent:
-                    client_secret = stripe_subscription.latest_invoice.payment_intent.client_secret
-                
+            subscription_data = {
+                'customer': user.stripe_customer_id,
+                'items': [{'price': plan.stripe_price_id, 'quantity': quantity}],
+                'expand': ['latest_invoice.payment_intent'],
+            }
+            if plan.trial_days > 0:
+                subscription_data['trial_period_days'] = plan.trial_days
+            if coupon_code:
+                coupon = Coupon.query.filter_by(code=coupon_code, active=True).first()
+                if coupon and coupon.stripe_coupon_id:
+                    subscription_data['coupon'] = coupon.stripe_coupon_id
+                    coupon.current_uses += 1
+                    db.session.commit()  # ✅ commit coupon usage immediately
+
+            stripe_subscription = stripe.Subscription.create(**subscription_data)
+            stripe_subscription_id = stripe_subscription.id
+            if stripe_subscription.latest_invoice and stripe_subscription.latest_invoice.payment_intent:
+                client_secret = stripe_subscription.latest_invoice.payment_intent.client_secret
         except stripe.error.StripeError as e:
             return jsonify({'error': f'Stripe error: {str(e)}'}), 400
 
-        # Create subscription in database
-        trial_end = None
-        if plan.trial_days > 0:
-            trial_end = datetime.utcnow() + timedelta(days=plan.trial_days)
-
+        # Save to DB
+        trial_end = datetime.utcnow() + timedelta(days=plan.trial_days) if plan.trial_days > 0 else None
         subscription = Subscription(
             user_id=user_id,
             plan_id=plan_id,
@@ -506,10 +488,7 @@ def create_subscription():
         db.session.commit()
 
         log_audit(user_id, 'SUBSCRIPTION_CREATED', f'Subscription created for plan {plan.name}', {
-            'subscription_id': subscription.id,
-            'plan_id': plan_id,
-            'quantity': quantity,
-            'coupon_code': coupon_code
+            'subscription_id': subscription.id, 'plan_id': plan_id, 'quantity': quantity
         })
         db.session.commit()
 
@@ -524,6 +503,7 @@ def create_subscription():
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
+
 
 @app.route('/api/subscriptions/<int:subscription_id>/quantity', methods=['PUT'])
 def update_subscription_quantity(subscription_id):
@@ -732,25 +712,106 @@ def change_subscription_plan(subscription_id):
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/subscriptions/search')
+def search_subscriptions():
+    status = request.args.get('status')
+    plan_id = request.args.get('plan_id')
+    page = int(request.args.get('page', 1))
+    per_page = int(request.args.get('per_page', 10))
+    
+    query = Subscription.query
+    if status:
+        query = query.filter_by(status=status)
+    if plan_id:
+        query = query.filter_by(plan_id=plan_id)
+    
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    return jsonify([sub.to_dict() for sub in pagination.items])
+
+@app.route('/api/dashboard/revenue')
+def dashboard_revenue():
+    total_revenue = db.session.query(db.func.sum(Subscription.amount)).scalar() or 0
+    return jsonify({'total_revenue': total_revenue})
+
+@app.route('/api/dashboard/subscriptions')
+def dashboard_subscriptions():
+    total_subscriptions = Subscription.query.count()
+    active_subscriptions = Subscription.query.filter_by(status='active').count()
+    return jsonify({
+        'total_subscriptions': total_subscriptions,
+        'active_subscriptions': active_subscriptions
+    })
+
+
+@app.route('/api/subscriptions/bulk-cancel', methods=['POST'])
+def bulk_cancel():
+    data = request.json
+    sub_ids = data.get('subscription_ids')
+    immediate = data.get('immediate', False)
+
+    if not sub_ids or not isinstance(sub_ids, list):
+        return jsonify({"error": "subscription_ids list required"}), 400
+
+    subs = Subscription.query.filter(Subscription.id.in_(sub_ids)).all()
+    for sub in subs:
+        sub.status = 'canceled'
+        if immediate:
+            sub.canceled_at = datetime.utcnow()
+    db.session.commit()
+
+    return jsonify({"message": f"{len(subs)} subscriptions canceled"}), 200
+
+@app.route('/api/export/subscriptions')
+def export_subscriptions():
+    export_format = request.args.get('format', 'json')
+    subscriptions = [s.to_dict() for s in Subscription.query.all()]
+    
+    if export_format == 'csv':
+        import csv, io
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=subscriptions[0].keys())
+        writer.writeheader()
+        writer.writerows(subscriptions)
+        return output.getvalue(), 200, {'Content-Type': 'text/csv'}
+    return jsonify(subscriptions)
+
+@app.route('/api/subscriptions/<int:subscription_id>/usage', methods=['POST'])
+def track_usage(subscription_id):
+    subscription = Subscription.query.get(subscription_id)
+    if not subscription:
+        return jsonify({"error": "Subscription not found"}), 404
+    
+    data = request.json
+    usage_quantity = data.get('quantity')
+    if not usage_quantity or usage_quantity <= 0:
+        return jsonify({"error": "Valid quantity is required"}), 400
+
+    usage_log = UsageLog(
+        subscription_id=subscription_id,
+        quantity=usage_quantity,
+        timestamp=datetime.utcnow()
+    )
+    db.session.add(usage_log)
+    db.session.commit()
+
+    return jsonify({"message": "Usage recorded successfully", "usage_id": usage_log.id}), 201
+
+
+
+# ---------------- Get User Subscriptions ---------------- #
 @app.route('/api/users/<int:user_id>/subscriptions', methods=['GET'])
 def get_user_subscriptions(user_id):
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     if not user:
         return jsonify({'error': 'User not found'}), 404
 
     subscriptions = Subscription.query.filter_by(user_id=user_id).all()
-    
     result = []
     for sub in subscriptions:
-        plan = Plan.query.get(sub.plan_id)
+        plan = db.session.get(Plan, sub.plan_id)
         result.append({
             'id': sub.id,
-            'plan': {
-                'id': plan.id,
-                'name': plan.name,
-                'amount': float(plan.amount),
-                'interval': plan.interval
-            },
+            'plan': {'id': plan.id, 'name': plan.name, 'amount': float(plan.amount)},
             'status': sub.status,
             'quantity': sub.quantity,
             'current_period_start': sub.current_period_start.isoformat() if sub.current_period_start else None,
@@ -760,3 +821,9 @@ def get_user_subscriptions(user_id):
             'stripe_subscription_id': sub.stripe_subscription_id,
             'created_at': sub.created_at.isoformat()
         })
+    return jsonify(result)
+        
+if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
+    app.run(debug=True, host='0.0.0.0', port=5000)
